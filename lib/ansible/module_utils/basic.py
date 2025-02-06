@@ -890,7 +890,9 @@ class AnsibleModule(object):
 
     def set_attributes_if_different(self, path, attributes, changed, diff=None, expand=True):
 
-        if attributes is None:
+        if not attributes:
+            # Make no change if None, and to preserve old behavior also make no change if an empty string or anything falsy
+            # To clear all attributes the value must be '=' to explicitly assign an empty set of flags
             return changed
 
         b_path = to_bytes(path, errors='surrogate_or_strict')
@@ -903,11 +905,16 @@ class AnsibleModule(object):
         existing = self.get_file_attributes(b_path, include_version=False)
 
         attr_mod = '='
-        if attributes.startswith(('-', '+')):
+        if attributes.startswith(('-', '+', '=')):
             attr_mod = attributes[0]
             attributes = attributes[1:]
 
-        if attributes and (existing.get('attr_flags', '') != attributes or attr_mod == '-'):
+        # use sets so flag order does not matter and we can leverage set operators
+        existing_set = set(existing.get('attr_flags', ''))
+        requested_set = set(attributes)
+        if ( (attr_mod == '=' and existing_set != requested_set)  # change needed if flag sets do not match
+            or (attr_mod == '+' and not(existing_set >= requested_set))  # change needed if flags to add are not a subset of existing flags
+            or (attr_mod == '-' and len(existing_set & requested_set) > 0) ): # change needed if set intersection with flags to remove is non-empty
             attrcmd = self.get_bin_path('chattr')
             if attrcmd:
                 attrcmd = [attrcmd, '%s%s' % (attr_mod, attributes), b_path]
